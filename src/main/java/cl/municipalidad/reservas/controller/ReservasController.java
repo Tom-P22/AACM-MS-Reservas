@@ -37,7 +37,6 @@ public class ReservasController {
 
 
     @PutMapping("/{id}/estado")
-    @PreAuthorize("hasRole('ADMIN')")
     public ResponseEntity<ReservasModel> actualizarEstado(
             @PathVariable("id") Long id,
             @RequestParam("nuevoEstado") String nuevoEstado) {
