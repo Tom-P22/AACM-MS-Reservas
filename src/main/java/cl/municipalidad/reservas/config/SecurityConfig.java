@@ -29,6 +29,17 @@ public class SecurityConfig {
             .csrf(csrf -> csrf.disable()) 
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             .authorizeHttpRequests(auth -> auth
+
+                .requestMatchers(
+        "/api/v1/reservas/v3/api-docs",
+                    "/api/v1/reservas/v3/api-docs/**",
+                    "/api/v1/reservas/doc/**",
+                    "/api/v1/reservas/swagger-ui.html",
+                    "/v3/api-docs", 
+                    "/v3/api-docs/**", 
+                    "/swagger-ui/**",
+                    "/swagger-ui.html"
+                ).permitAll()
                 .anyRequest().authenticated() 
             )
             .oauth2ResourceServer(oauth2 -> oauth2.jwt(jwt -> {

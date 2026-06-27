@@ -27,27 +27,41 @@ public class ReservasService {
     private final ReservasRepository reservasRepository;
     private final CanchasClient canchasClient;
 
-    // Inyección por constructor
     public ReservasService(ReservasRepository reservasRepository, CanchasClient canchasClient) {
         this.reservasRepository = reservasRepository;
         this.canchasClient = canchasClient;
     }
 
     public ReservasModel crearReserva(DtoReservaRequest request) {
+        log.info("Iniciando proceso de creación de reserva para el usuario ID: {} en cancha ID: {}", 
+                request.getIdUsuario(), request.getIdCancha());
 
-        HttpServletRequest requestOriginal = ((ServletRequestAttributes) RequestContextHolder.getRequestAttributes()).getRequest();
-        String tokenBearer = requestOriginal.getHeader("Authorization");
 
-
-        DtoCanchaResponse canchaRemota = canchasClient.consultarCancha(tokenBearer, request.getIdCancha());
-
-        if (canchaRemota == null) {
+        if (request.getHoraFin().isBefore(request.getHoraInicio()) || request.getHoraFin().equals(request.getHoraInicio())) {
+            log.warn("Intento de reserva fallido: La hora de fin ({}) es anterior o igual a la de inicio ({})", 
+                    request.getHoraFin(), request.getHoraInicio());
             throw new ResponseStatusException(HttpStatus.BAD_REQUEST, 
-                "No se puede crear la reserva: La cancha especificada no existe o el servicio no está disponible.");
+                    "La hora de fin debe ser estrictamente posterior a la hora de inicio.");
         }
 
-        //Extrae info operador
-        String usuarioEjecutor = obtenerInfoUsuarioLog();
+        String token = null;
+        try {
+            ServletRequestAttributes attributes = (ServletRequestAttributes) RequestContextHolder.getRequestAttributes();
+            if (attributes != null) {
+                HttpServletRequest httpRequest = attributes.getRequest();
+                token = httpRequest.getHeader("Authorization");
+            }
+        } catch (Exception e) {
+            log.warn("No se pudo extraer el encabezado Authorization de la petición actual: {}", e.getMessage());
+        }
+
+
+        DtoCanchaResponse canchaDto = canchasClient.consultarCancha(token, request.getIdCancha());
+        
+        if (canchaDto == null) {
+            log.error("Reserva rechazada: La cancha con ID {} no existe en el sistema central.", request.getIdCancha());
+            throw new ResponseStatusException(HttpStatus.NOT_FOUND, "La cancha especificada no existe.");
+        }
 
         ReservasModel nuevaReserva = new ReservasModel();
         nuevaReserva.setIdCancha(request.getIdCancha());
@@ -55,33 +69,32 @@ public class ReservasService {
         nuevaReserva.setFechaReserva(request.getFechaReserva());
         nuevaReserva.setHoraInicio(request.getHoraInicio());
         nuevaReserva.setHoraFin(request.getHoraFin());
-        nuevaReserva.setNombreCanchaForaneo(canchaRemota.getNombre());
+        nuevaReserva.setEstadoReserva("PENDIENTE");
+        nuevaReserva.setNombreCanchaForaneo(canchaDto.getNombre());
+
+       
+        nuevaReserva.setCreadoPor(obtenerInfoUsuarioLog());
+
+        ReservasModel guardada = reservasRepository.save(nuevaReserva);
+        log.info("Reserva creada con éxito. ID Asignado: {} Estado: {}", guardada.getIdReserva(), guardada.getEstadoReserva());
         
-        //Registra operador 
-        nuevaReserva.setCreadoPor(usuarioEjecutor);
-
-        ReservasModel reservaGuardada = reservasRepository.save(nuevaReserva);
-
-        log.info("[RESERVA] Usuario {} AGENDÓ la cancha '{}' para el día {}", 
-                usuarioEjecutor, canchaRemota.getNombre(), reservaGuardada.getFechaReserva());
-
-        return reservaGuardada;
+        return guardada;
     }
 
-    public ReservasModel confirmarEstadoReserva(Long idReserva, String nuevoEstado) {
-        ReservasModel reserva = reservasRepository.findById(idReserva)
-                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reserva no encontrada con el ID: " + idReserva));
+    public ReservasModel confirmarEstadoReserva(Long id, String nuevoEstado) {
+        log.info("Cambiando estado de reserva ID: {} a -> {}", id, nuevoEstado);
         
-        String estadoAnterior = reserva.getEstadoReserva();
-        reserva.setEstadoReserva(nuevoEstado.toUpperCase());
-        ReservasModel reservaActualizada = reservasRepository.save(reserva);
+        ReservasModel reserva = reservasRepository.findById(id)
+                .orElseThrow(() -> new ResponseStatusException(HttpStatus.NOT_FOUND, "Reserva no encontrada"));
 
-        log.info("[ESTADO]{} Usuario {} CAMBIÓ la reserva ID {} de '{}' a '{}'", 
-                obtenerInfoUsuarioLog(), idReserva, estadoAnterior, reservaActualizada.getEstadoReserva());
+        String estadoNormalizado = nuevoEstado.toUpperCase();
+        if (!estadoNormalizado.equals("PENDIENTE") && !estadoNormalizado.equals("CONFIRMADA") && !estadoNormalizado.equals("CANCELADA")) {
+            throw new ResponseStatusException(HttpStatus.BAD_REQUEST, "Estado de reserva no válido");
+        }
 
-        return reservaActualizada;
+        reserva.setEstadoReserva(estadoNormalizado);
+        return reservasRepository.save(reserva);
     }
-
 
     public Integer contarReservasPorRango(LocalDate inicio, LocalDate fin) {
         Integer conteo = reservasRepository.countByFechaReservaBetween(inicio, fin);
@@ -112,10 +125,10 @@ public class ReservasService {
         } catch (Exception e) {
             log.warn("No se pudo extraer la info del usuario", e);
         }
-        return "Usuario del Sistema"; // Caída por defecto
+        return "Usuario del Sistema"; 
     }
 
     public List<ReservasModel> obtenerReservasPorUsuario(Long idUsuario) {
-    return reservasRepository.findByIdUsuario(idUsuario);
-}
+        return reservasRepository.findByIdUsuario(idUsuario);
+    }
 }

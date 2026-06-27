@@ -2,32 +2,34 @@ package cl.municipalidad.reservas.client;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Component;
-import org.springframework.web.client.HttpClientErrorException;
-import org.springframework.web.client.RestClient;
+import org.springframework.web.reactive.function.client.WebClient;
 import cl.municipalidad.reservas.dto.response.DtoCanchaResponse;
+import org.springframework.web.reactive.function.client.WebClientResponseException;
 
 @Component
 public class CanchasClient {
 
     private static final Logger logger = LoggerFactory.getLogger(CanchasClient.class);
-    private final RestClient restClient;
+    private final WebClient webClient;
 
-    public CanchasClient() {
-        this.restClient = RestClient.create();
+    public CanchasClient(@Qualifier("webClientCanchas") WebClient webClient) {
+        this.webClient = webClient;
     }
 
     public DtoCanchaResponse consultarCancha(String token, Integer idCancha) {
         try {
-            logger.info("Verificando Cancha ID: {} (Llevando token: {})", idCancha, token != null ? "SÍ" : "NO");
+            logger.info("Verificando Cancha ID: {} de forma interna", idCancha);
             
-            return restClient.get()
-                    .uri("http://localhost:8080/api/v1/canchas/" + idCancha)
+            return webClient.get()
+                    .uri("/api/v1/canchas/" + idCancha)
                     .header("Authorization", token) 
                     .retrieve()
-                    .body(DtoCanchaResponse.class);
+                    .bodyToMono(DtoCanchaResponse.class)
+                    .block();
                     
-        } catch (HttpClientErrorException.NotFound e) {
+        } catch (WebClientResponseException.NotFound e) {
             logger.warn("Cancha con ID {} no encontrada (404) en ms-canchas.", idCancha);
             return null;
         } catch (Exception e) {
